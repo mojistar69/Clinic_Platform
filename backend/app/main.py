@@ -3,11 +3,11 @@ from app.api import patients
 from app.api import appointments
 from app.database.database import engine
 from app.database.database import Base
-
+from app.api import auth
 from app.models import models
 
 from app.api import doctors
-
+from app.models import user
 
 Base.metadata.create_all(bind=engine)
 
@@ -28,6 +28,10 @@ app.include_router(
 
 app.include_router(
     appointments.router
+)
+
+app.include_router(
+    auth.router
 )
 
 @app.get("/")

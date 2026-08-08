@@ -3,29 +3,27 @@ from datetime import datetime, timedelta
 from jose import jwt
 
 
-SECRET_KEY = "clinic-secret-key-change-later"
+SECRET_KEY = "CHANGE_THIS_SECRET_KEY"
 
 ALGORITHM = "HS256"
 
 
 def create_access_token(
     data: dict,
-    expires_minutes: int = 60
+    minutes: int = 60
 ):
 
-    to_encode = data.copy()
+    payload = data.copy()
 
     expire = datetime.utcnow() + timedelta(
-        minutes=expires_minutes
+        minutes=minutes
     )
 
-    to_encode.update({
-        "exp": expire
-    })
+    payload["exp"] = expire
 
 
     return jwt.encode(
-        to_encode,
+        payload,
         SECRET_KEY,
         algorithm=ALGORITHM
     )

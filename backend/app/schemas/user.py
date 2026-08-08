@@ -2,22 +2,17 @@ from pydantic import BaseModel
 
 
 class UserCreate(BaseModel):
-
     mobile: str
     password: str
     full_name: str
 
 
-
 class UserLogin(BaseModel):
-
     mobile: str
     password: str
 
 
-
 class UserResponse(BaseModel):
-
     id: int
     mobile: str
     full_name: str
@@ -25,3 +20,8 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
