@@ -3,10 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.models.models import Doctor
-from app.schemas.schemas import (
-    DoctorCreate,
-    DoctorResponse
-)
+from app.schemas.doctor import DoctorCreate, DoctorResponse
 
 
 router = APIRouter(
@@ -15,7 +12,10 @@ router = APIRouter(
 )
 
 
-@router.post("/", response_model=DoctorResponse)
+@router.post(
+    "",
+    response_model=DoctorResponse
+)
 def create_doctor(
     doctor: DoctorCreate,
     db: Session = Depends(get_db)
@@ -35,8 +35,10 @@ def create_doctor(
     return new_doctor
 
 
-
-@router.get("/", response_model=list[DoctorResponse])
+@router.get(
+    "",
+    response_model=list[DoctorResponse]
+)
 def get_doctors(
     db: Session = Depends(get_db)
 ):
