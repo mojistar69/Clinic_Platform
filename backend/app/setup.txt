@@ -1,0 +1,6 @@
+
+
+pip show fastapi
+
+
+python -m pip install fastapi
