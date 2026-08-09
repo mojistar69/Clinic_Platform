@@ -121,3 +121,104 @@ class Appointment(Base):
     doctor = relationship(
         "Doctor"
     )
+    
+class DoctorSchedule(Base):
+    __tablename__ = "doctor_schedules"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    doctor_id = Column(
+        Integer,
+        ForeignKey("doctors.id"),
+        nullable=False,
+        index=True
+    )
+
+    weekday = Column(
+        Integer,
+        nullable=False
+    )
+
+    start_time = Column(
+        String,
+        nullable=False
+    )
+
+    end_time = Column(
+        String,
+        nullable=False
+    )
+
+    slot_duration = Column(
+        Integer,
+        nullable=False,
+        default=15
+    )
+
+    capacity = Column(
+        Integer,
+        nullable=False,
+        default=20
+    )
+
+    is_active = Column(
+        Boolean,
+        default=True
+    )
+
+    doctor = relationship(
+        "Doctor"
+    )
+    
+    
+    
+    
+    
+    
+class DailyDoctorQueue(Base):
+    __tablename__ = "daily_doctor_queues"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    doctor_id = Column(
+        Integer,
+        ForeignKey("doctors.id"),
+        nullable=False,
+        index=True
+    )
+
+    queue_date = Column(
+        String,
+        nullable=False,
+        index=True
+    )
+
+    capacity = Column(
+        Integer,
+        nullable=False,
+        default=20
+    )
+
+    current_number = Column(
+        Integer,
+        nullable=False,
+        default=0
+    )
+
+    status = Column(
+        String,
+        nullable=False,
+        default="CLOSED"
+    )
+
+    doctor = relationship(
+        "Doctor"
+    )

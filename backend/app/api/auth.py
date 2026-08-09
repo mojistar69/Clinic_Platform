@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+
 from app.auth.dependencies import get_current_user
 from app.auth.permissions import require_role
+
 from app.database.database import get_db
 from app.models.user import User
 
@@ -117,6 +119,7 @@ def login(
     return {
         "access_token": token,
         "token_type": "bearer"
+
     }
     
     
@@ -143,4 +146,5 @@ def admin_test(
     return {
         "message": "Welcome Admin",
         "user": current_user.full_name
+
     }

@@ -6,9 +6,9 @@ from app.api import auth
 from app.api import doctors
 from app.api import patients
 from app.api import appointments
-
+from app.api import doctor_schedules
 from app.models import user
-from app.models import doctor
+
 
 
 Base.metadata.create_all(bind=engine)
@@ -34,6 +34,10 @@ app.include_router(
 
 app.include_router(
     auth.router
+)
+
+app.include_router(
+    doctor_schedules.router
 )
 
 
