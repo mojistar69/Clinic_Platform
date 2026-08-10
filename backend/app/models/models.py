@@ -1,4 +1,11 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Boolean,
+    ForeignKey,
+    DateTime
+)
 from sqlalchemy.orm import relationship
     
 from sqlalchemy import DateTime
@@ -89,12 +96,20 @@ class Appointment(Base):
 
     patient_id = Column(
         Integer,
-        ForeignKey("patients.id")
+        ForeignKey("patients.id"),
+        nullable=False
     )
 
     doctor_id = Column(
         Integer,
-        ForeignKey("doctors.id")
+        ForeignKey("doctors.id"),
+        nullable=False
+    )
+
+    appointment_date = Column(
+        String,
+        nullable=False,
+        index=True
     )
 
     queue_number = Column(
@@ -104,19 +119,18 @@ class Appointment(Base):
 
     status = Column(
         String,
+        nullable=False,
         default="WAITING"
     )
 
     appointment_time = Column(
-        DateTime,
-        default=datetime.utcnow
+        String,
+        nullable=True
     )
-
 
     patient = relationship(
         "Patient"
     )
-
 
     doctor = relationship(
         "Doctor"
@@ -217,6 +231,11 @@ class DailyDoctorQueue(Base):
         String,
         nullable=False,
         default="CLOSED"
+    )
+
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow
     )
 
     doctor = relationship(

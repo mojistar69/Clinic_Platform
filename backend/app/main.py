@@ -8,7 +8,8 @@ from app.api import patients
 from app.api import appointments
 from app.api import doctor_schedules
 from app.models import user
-
+from app.api import daily_queue
+from app.scheduler import start_scheduler, stop_scheduler
 
 
 Base.metadata.create_all(bind=engine)
@@ -19,6 +20,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
+@app.on_event("startup")
+def startup_event():
+    start_scheduler()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    stop_scheduler()
+    
 
 app.include_router(
     doctors.router
@@ -40,6 +50,9 @@ app.include_router(
     doctor_schedules.router
 )
 
+app.include_router(
+    daily_queue.router
+)
 
 @app.get("/")
 def root():
