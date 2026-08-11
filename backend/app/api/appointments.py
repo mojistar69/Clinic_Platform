@@ -12,12 +12,28 @@ from app.schemas.appointment import (
     AppointmentBookRequest,
     AppointmentResponse
 )
+from app.models.models import (
+    Appointment,
+    Patient,
+    Doctor,
+    DoctorSchedule,
+    DailyDoctorQueue
+)
+import jdatetime
+
+from app.services.appointment_service import calculate_appointment_time
 
 router = APIRouter(
     prefix="/appointments",
     tags=["Appointments"]
 )
-
+from app.models.models import (
+    Appointment,
+    Patient,
+    Doctor,
+    DailyDoctorQueue,
+    DoctorSchedule
+)
 
 @router.post(
     "/book",
@@ -101,6 +117,35 @@ def book_appointment(
     # 7. شماره بعدی
     next_number = queue.current_number + 1
 
+    #7.5
+    # پیدا کردن روز هفته تاریخ نوبت
+    appointment_date = jdatetime.datetime.strptime(
+    request.queue_date,
+    "%Y-%m-%d"
+    ).date()
+
+    weekday = appointment_date.weekday()
+
+    # پیدا کردن برنامه پزشک در آن روز
+    schedule = db.query(DoctorSchedule).filter(
+    DoctorSchedule.doctor_id == request.doctor_id,
+    DoctorSchedule.weekday == weekday,
+    DoctorSchedule.is_active == True
+    ).first()
+
+    if not schedule:
+        raise HTTPException(
+        status_code=400,
+        detail="Doctor has no active schedule for this day"
+    )
+
+    # محاسبه ساعت مراجعه
+    appointment_time = calculate_appointment_time(
+    schedule.start_time,
+    next_number,
+    schedule.slot_duration
+)
+
     # 8. افزایش شمارنده
     queue.current_number = next_number
 
@@ -108,13 +153,18 @@ def book_appointment(
     if next_number >= queue.capacity:
         queue.status = "FULL"
 
+
+
+
+
     # 10. ایجاد نوبت
     appointment = Appointment(
-        patient_id=request.patient_id,
-        doctor_id=request.doctor_id,
-        appointment_date=request.queue_date,
-        queue_number=next_number,
-        status="WAITING"
+    patient_id=request.patient_id,
+    doctor_id=request.doctor_id,
+    appointment_date=request.queue_date,
+    queue_number=next_number,
+    status="WAITING",
+    appointment_time=appointment_time
     )
 
     db.add(appointment)
@@ -122,5 +172,4 @@ def book_appointment(
     # 11. ذخیره
     db.commit()
     db.refresh(appointment)
-
     return appointment
