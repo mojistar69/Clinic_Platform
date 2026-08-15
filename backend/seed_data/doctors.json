@@ -1,0 +1,39 @@
+[
+  {
+    "name": "دکتر غفوری",
+    "specialty": "متخصص روانپزشکی",
+    "room_number": "101",
+    "clinic_id": 1,
+    "schedules": [
+      {
+        "weekday": 0,
+        "start_time": "08:00",
+        "end_time": "13:00",
+        "slot_duration": 15,
+        "capacity": 20
+      },
+      {
+        "weekday": 2,
+        "start_time": "08:00",
+        "end_time": "13:00",
+        "slot_duration": 15,
+        "capacity": 20
+      }
+    ]
+  },
+  {
+    "name": "دکتر محمدی",
+    "specialty": "متخصص جراحی کلیه و مجاری ادراری تناسلی",
+    "room_number": "102",
+    "clinic_id": 1,
+    "schedules": [
+      {
+        "weekday": 1,
+        "start_time": "09:00",
+        "end_time": "13:00",
+        "slot_duration": 15,
+        "capacity": 16
+      }
+    ]
+  }
+]

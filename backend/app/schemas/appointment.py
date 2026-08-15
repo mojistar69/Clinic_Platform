@@ -2,7 +2,7 @@ from pydantic import BaseModel
 
 
 class AppointmentBookRequest(BaseModel):
-    patient_id: int
+
     doctor_id: int
     queue_date: str
 

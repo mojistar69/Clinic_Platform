@@ -10,7 +10,7 @@ from app.api import doctor_schedules
 from app.models import user
 from app.api import daily_queue
 from app.scheduler import start_scheduler, stop_scheduler
-
+from app.api import doctor_panel
 
 Base.metadata.create_all(bind=engine)
 
@@ -40,6 +40,10 @@ app.include_router(
 
 app.include_router(
     appointments.router
+)
+
+app.include_router(
+doctor_panel.router
 )
 
 app.include_router(

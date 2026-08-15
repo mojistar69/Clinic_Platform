@@ -6,7 +6,7 @@ from app.auth.permissions import require_role
 
 from app.database.database import get_db
 from app.models.user import User
-
+from app.models.models import Patient
 from app.schemas.user import (
     UserCreate,
     UserLogin,
@@ -29,8 +29,6 @@ router = APIRouter(
     tags=["Authentication"]
 )
 
-
-
 @router.post(
     "/register",
     response_model=UserResponse
@@ -39,12 +37,10 @@ def register(
     user: UserCreate,
     db: Session = Depends(get_db)
 ):
-
+    # 1. بررسی تکراری نبودن شماره موبایل
     exists = (
         db.query(User)
-        .filter(
-            User.mobile == user.mobile
-        )
+        .filter(User.mobile == user.mobile)
         .first()
     )
 
@@ -54,20 +50,35 @@ def register(
             detail="Mobile already registered"
         )
 
+    # 2. ساخت پرونده بیمار
+    patient = Patient(
+        first_name=user.first_name,
+        last_name=user.last_name,
+        mobile=user.mobile,
+        national_code=user.national_code,
+        birth_date=user.birth_date
+    )
 
+    db.add(patient)
+    db.flush()
+
+    # 3. ساخت حساب کاربری
     new_user = User(
         mobile=user.mobile,
         full_name=user.full_name,
-        password_hash=hash_password(
-            user.password
-        )
+        password_hash=hash_password(user.password),
+        role="PATIENT",
+        patient_id=patient.id,
+        is_active=True
     )
 
-
     db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
 
+    # 4. ذخیره نهایی
+    db.commit()
+
+    # 5. دریافت اطلاعات نهایی
+    db.refresh(new_user)
 
     return new_user
 
