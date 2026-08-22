@@ -11,6 +11,8 @@ from app.models import user
 from app.api import daily_queue
 from app.scheduler import start_scheduler, stop_scheduler
 from app.api import doctor_panel
+from fastapi.middleware.cors import CORSMiddleware
+from app.api import doctor_calendar
 
 Base.metadata.create_all(bind=engine)
 
@@ -20,6 +22,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 @app.on_event("startup")
 def startup_event():
     start_scheduler()
@@ -56,6 +66,9 @@ app.include_router(
 
 app.include_router(
     daily_queue.router
+)
+app.include_router(
+    doctor_calendar.router
 )
 
 @app.get("/")

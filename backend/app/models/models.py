@@ -4,7 +4,8 @@ from sqlalchemy import (
     String,
     Boolean,
     ForeignKey,
-    DateTime
+    DateTime,
+    UniqueConstraint
 )
 from sqlalchemy.orm import relationship
     
@@ -190,11 +191,16 @@ class DoctorSchedule(Base):
     
     
     
-    
-    
-    
 class DailyDoctorQueue(Base):
     __tablename__ = "daily_doctor_queues"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "doctor_id",
+            "queue_date",
+            name="uq_doctor_queue_date"
+        ),
+    )
 
     id = Column(
         Integer,
