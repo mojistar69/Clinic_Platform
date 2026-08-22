@@ -1,1 +1,0 @@
-python -c "import sqlite3; c=sqlite3.connect('clinic.db'); print(c.execute('SELECT id,mobile,role,patient_id FROM users').fetchall()); c.close()"

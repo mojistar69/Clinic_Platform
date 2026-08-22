@@ -1,11 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
-import jdatetime
-
 from app.auth.dependencies import get_current_user
-from app.database.database import get_db
 from app.models.user import User
+from app.database.database import get_db
+from app.models.models import (
+    Appointment,
+    Patient,
+    Doctor,
+    DailyDoctorQueue
+)
+from app.schemas.appointment import (
+    AppointmentBookRequest,
+    AppointmentResponse
+)
 from app.models.models import (
     Appointment,
     Patient,
@@ -13,23 +20,26 @@ from app.models.models import (
     DoctorSchedule,
     DailyDoctorQueue
 )
-from app.schemas.appointment import (
-    AppointmentBookRequest,
-    AppointmentResponse
-)
-from app.services.appointment_service import calculate_appointment_time
+import jdatetime
 
+from app.services.appointment_service import calculate_appointment_time
 
 router = APIRouter(
     prefix="/appointments",
     tags=["Appointments"]
 )
+from app.models.models import (
+    Appointment,
+    Patient,
+    Doctor,
+    DailyDoctorQueue,
+    DoctorSchedule
+)
 
-
-# =========================================================
-# Book Appointment
-# =========================================================
-
+@router.post(
+    "/book",
+    response_model=AppointmentResponse
+)
 @router.post(
     "/book",
     response_model=AppointmentResponse
@@ -40,26 +50,23 @@ def book_appointment(
     current_user: User = Depends(get_current_user)
 ):
 
-    # 1. فقط بیمار می‌تواند نوبت بگیرد
+    # 1. بررسی اینکه کاربر بیمار باشد
     if current_user.role != "PATIENT":
         raise HTTPException(
             status_code=403,
             detail="Only patients can book appointments"
         )
 
-    # 2. بررسی اتصال User به Patient
+    # 2. پیدا کردن بیمار از روی کاربر لاگین‌شده
     if not current_user.patient_id:
         raise HTTPException(
             status_code=404,
             detail="Patient profile not found"
         )
 
-    # 3. پیدا کردن بیمار از روی JWT
-    patient = (
-        db.query(Patient)
-        .filter(Patient.id == current_user.patient_id)
-        .first()
-    )
+    patient = db.query(Patient).filter(
+        Patient.id == current_user.patient_id
+    ).first()
 
     if not patient:
         raise HTTPException(
@@ -67,12 +74,10 @@ def book_appointment(
             detail="Patient not found"
         )
 
-    # 4. بررسی پزشک
-    doctor = (
-        db.query(Doctor)
-        .filter(Doctor.id == request.doctor_id)
-        .first()
-    )
+    # 3. بررسی پزشک
+    doctor = db.query(Doctor).filter(
+        Doctor.id == request.doctor_id
+    ).first()
 
     if not doctor:
         raise HTTPException(
@@ -80,15 +85,11 @@ def book_appointment(
             detail="Doctor not found"
         )
 
-    # 5. پیدا کردن صف روزانه
-    queue = (
-        db.query(DailyDoctorQueue)
-        .filter(
-            DailyDoctorQueue.doctor_id == request.doctor_id,
-            DailyDoctorQueue.queue_date == request.queue_date
-        )
-        .first()
-    )
+    # 4. پیدا کردن صف روزانه
+    queue = db.query(DailyDoctorQueue).filter(
+        DailyDoctorQueue.doctor_id == request.doctor_id,
+        DailyDoctorQueue.queue_date == request.queue_date
+    ).first()
 
     if not queue:
         raise HTTPException(
@@ -96,30 +97,25 @@ def book_appointment(
             detail="Daily queue not found"
         )
 
-    # 6. بررسی وضعیت صف
-    if queue.status != "OPEN":
-        if queue.status == "FULL":
-            raise HTTPException(
-                status_code=400,
-                detail="Appointment capacity is full"
-            )
+    # 5. بررسی وضعیت صف
+    if queue.status == "FULL":
+        raise HTTPException(
+            status_code=400,
+            detail="Appointment capacity is full"
+        )
 
+    if queue.status != "OPEN":
         raise HTTPException(
             status_code=400,
             detail="Appointment booking is not open"
         )
 
-    # 7. جلوگیری از نوبت تکراری
-    existing = (
-        db.query(Appointment)
-        .filter(
-            Appointment.patient_id == patient.id,
-            Appointment.doctor_id == request.doctor_id,
-            Appointment.appointment_date == request.queue_date,
-            Appointment.status != "CANCELLED"
-        )
-        .first()
-    )
+    # 6. جلوگیری از نوبت تکراری
+    existing = db.query(Appointment).filter(
+        Appointment.patient_id == patient.id,
+        Appointment.doctor_id == request.doctor_id,
+        Appointment.appointment_date == request.queue_date
+    ).first()
 
     if existing:
         raise HTTPException(
@@ -127,7 +123,7 @@ def book_appointment(
             detail="Patient already has an appointment for this doctor on this date"
         )
 
-    # 8. بررسی ظرفیت
+    # 7. بررسی ظرفیت
     if queue.current_number >= queue.capacity:
         queue.status = "FULL"
         db.commit()
@@ -137,33 +133,23 @@ def book_appointment(
             detail="Appointment capacity is full"
         )
 
-    # 9. شماره بعدی صف
+    # 8. شماره بعدی
     next_number = queue.current_number + 1
 
-    # 10. تبدیل تاریخ جلالی به تاریخ برای تعیین روز هفته
-    try:
-        appointment_date = jdatetime.datetime.strptime(
-            request.queue_date,
-            "%Y-%m-%d"
-        ).date()
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid date format. Use YYYY-MM-DD"
-        )
+    # 9. پیدا کردن روز هفته
+    appointment_date = jdatetime.datetime.strptime(
+        request.queue_date,
+        "%Y-%m-%d"
+    ).date()
 
     weekday = appointment_date.weekday()
 
-    # 11. پیدا کردن برنامه پزشک
-    schedule = (
-        db.query(DoctorSchedule)
-        .filter(
-            DoctorSchedule.doctor_id == request.doctor_id,
-            DoctorSchedule.weekday == weekday,
-            DoctorSchedule.is_active == True
-        )
-        .first()
-    )
+    # 10. پیدا کردن برنامه پزشک
+    schedule = db.query(DoctorSchedule).filter(
+        DoctorSchedule.doctor_id == request.doctor_id,
+        DoctorSchedule.weekday == weekday,
+        DoctorSchedule.is_active == True
+    ).first()
 
     if not schedule:
         raise HTTPException(
@@ -171,21 +157,21 @@ def book_appointment(
             detail="Doctor has no active schedule for this day"
         )
 
-    # 12. محاسبه ساعت مراجعه
+    # 11. محاسبه ساعت مراجعه
     appointment_time = calculate_appointment_time(
         schedule.start_time,
         next_number,
         schedule.slot_duration
     )
 
-    # 13. افزایش شماره فعلی صف
+    # 12. افزایش شمارنده صف
     queue.current_number = next_number
 
-    # 14. اگر ظرفیت پر شد، صف را ببند
+    # 13. بستن صف در صورت تکمیل ظرفیت
     if next_number >= queue.capacity:
         queue.status = "FULL"
 
-    # 15. ایجاد نوبت
+    # 14. ایجاد نوبت
     appointment = Appointment(
         patient_id=patient.id,
         doctor_id=request.doctor_id,
@@ -197,104 +183,28 @@ def book_appointment(
 
     db.add(appointment)
 
-    # 16. ذخیره
+    # 15. ذخیره
     db.commit()
     db.refresh(appointment)
 
     return appointment
-
-
-# =========================================================
-# Cancel Appointment
-# =========================================================
-
-@router.post(
-    "/{appointment_id}/cancel",
-    response_model=AppointmentResponse
-)
-def cancel_appointment(
-    appointment_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-
-    # بررسی اتصال کاربر به بیمار
-    if not current_user.patient_id:
-        raise HTTPException(
-            status_code=403,
-            detail="User is not linked to a patient"
-        )
-
-    # فقط نوبت متعلق به همین بیمار پیدا شود
-    appointment = (
-        db.query(Appointment)
-        .filter(
-            Appointment.id == appointment_id,
-            Appointment.patient_id == current_user.patient_id
-        )
-        .first()
-    )
-
-    if not appointment:
-        raise HTTPException(
-            status_code=404,
-            detail="Appointment not found"
-        )
-
-    # نوبت قبلاً لغو شده
-    if appointment.status == "CANCELLED":
-        raise HTTPException(
-            status_code=400,
-            detail="Appointment is already cancelled"
-        )
-
-    # نوبت تکمیل شده
-    if appointment.status == "COMPLETED":
-        raise HTTPException(
-            status_code=400,
-            detail="Completed appointment cannot be cancelled"
-        )
-
-    # لغو نوبت
-    appointment.status = "CANCELLED"
-
-    # پیدا کردن صف
-    queue = (
-        db.query(DailyDoctorQueue)
-        .filter(
-            DailyDoctorQueue.doctor_id == appointment.doctor_id,
-            DailyDoctorQueue.queue_date == appointment.appointment_date
-        )
-        .first()
-    )
-
-    # اگر صف FULL بوده، دوباره OPEN شود
-    if queue and queue.status == "FULL":
-        queue.status = "OPEN"
-
-    db.commit()
-    db.refresh(appointment)
-
-    return appointment
-
-
-# =========================================================
-# My Recent Appointments
-# =========================================================
-
+    
 @router.get(
-    "/my/recent",
+    "/patient/{patient_id}/recent",
     response_model=list[AppointmentResponse]
 )
-def get_my_recent_appointments(
-    current_user: User = Depends(get_current_user),
+def get_recent_patient_appointments(
+    patient_id: int,
     db: Session = Depends(get_db)
 ):
+    patient = db.query(Patient).filter(
+        Patient.id == patient_id
+    ).first()
 
-    if not current_user.patient_id:
+    if not patient:
         raise HTTPException(
             status_code=404,
-            detail="Patient profile not found"
+            detail="Patient not found"
         )
 
     today = jdatetime.date.today().strftime("%Y-%m-%d")
@@ -302,7 +212,7 @@ def get_my_recent_appointments(
     appointments = (
         db.query(Appointment)
         .filter(
-            Appointment.patient_id == current_user.patient_id,
+            Appointment.patient_id == patient_id,
             Appointment.appointment_date <= today
         )
         .order_by(
@@ -314,25 +224,24 @@ def get_my_recent_appointments(
     )
 
     return appointments
-
-
-# =========================================================
-# My Upcoming Appointments
-# =========================================================
-
+    
+    
 @router.get(
-    "/my/upcoming",
+    "/patient/{patient_id}/upcoming",
     response_model=list[AppointmentResponse]
 )
-def get_my_upcoming_appointments(
-    current_user: User = Depends(get_current_user),
+def get_upcoming_patient_appointments(
+    patient_id: int,
     db: Session = Depends(get_db)
 ):
+    patient = db.query(Patient).filter(
+        Patient.id == patient_id
+    ).first()
 
-    if not current_user.patient_id:
+    if not patient:
         raise HTTPException(
             status_code=404,
-            detail="Patient profile not found"
+            detail="Patient not found"
         )
 
     today = jdatetime.date.today().strftime("%Y-%m-%d")
@@ -340,7 +249,7 @@ def get_my_upcoming_appointments(
     appointments = (
         db.query(Appointment)
         .filter(
-            Appointment.patient_id == current_user.patient_id,
+            Appointment.patient_id == patient_id,
             Appointment.appointment_date >= today,
             Appointment.status.in_([
                 "WAITING",
@@ -355,25 +264,23 @@ def get_my_upcoming_appointments(
     )
 
     return appointments
-
-
-# =========================================================
-# My Appointment History
-# =========================================================
-
+    
 @router.get(
-    "/my/history",
+    "/patient/{patient_id}/history",
     response_model=list[AppointmentResponse]
 )
-def get_my_appointment_history(
-    current_user: User = Depends(get_current_user),
+def get_patient_appointment_history(
+    patient_id: int,
     db: Session = Depends(get_db)
 ):
+    patient = db.query(Patient).filter(
+        Patient.id == patient_id
+    ).first()
 
-    if not current_user.patient_id:
+    if not patient:
         raise HTTPException(
             status_code=404,
-            detail="Patient profile not found"
+            detail="Patient not found"
         )
 
     today = jdatetime.date.today().strftime("%Y-%m-%d")
@@ -381,7 +288,7 @@ def get_my_appointment_history(
     appointments = (
         db.query(Appointment)
         .filter(
-            Appointment.patient_id == current_user.patient_id,
+            Appointment.patient_id == patient_id,
             Appointment.appointment_date < today
         )
         .order_by(

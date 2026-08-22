@@ -191,6 +191,9 @@ class DoctorSchedule(Base):
     
     
     
+    
+    
+    
 class DailyDoctorQueue(Base):
     __tablename__ = "daily_doctor_queues"
 
