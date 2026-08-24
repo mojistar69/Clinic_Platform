@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-import jdatetime
-
 from app.database.database import get_db
 from app.auth.permissions import require_role
 
@@ -22,18 +20,16 @@ router = APIRouter(
 
 
 # =========================================================
-# Dashboard
+# Helpers
 # =========================================================
 
-@router.get("/dashboard")
-def doctor_dashboard(
-    current_user: User = Depends(
-        require_role("DOCTOR")
-    ),
-    db: Session = Depends(get_db)
+def get_current_doctor(
+    current_user: User,
+    db: Session
 ):
-
-    # 1. پیدا کردن پزشک
+    """
+    Get the Doctor linked to the authenticated User.
+    """
 
     if not current_user.doctor_id:
         raise HTTPException(
@@ -55,19 +51,65 @@ def doctor_dashboard(
             detail="Doctor not found"
         )
 
-    # 2. تاریخ امروز شمسی
+    return doctor
 
-    today = jdatetime.date.today().strftime(
-        "%Y-%m-%d"
+
+def appointment_to_response(
+    appointment: Appointment,
+    db: Session
+):
+    """
+    Convert appointment + patient information
+    into a clean response.
+    """
+
+    patient = (
+        db.query(Patient)
+        .filter(
+            Patient.id == appointment.patient_id
+        )
+        .first()
     )
 
-    # 3. تمام نوبت‌های امروز
+    return {
+        "appointment_id": appointment.id,
+        "queue_number": appointment.queue_number,
+        "patient_id": appointment.patient_id,
+        "patient_name": (
+            f"{patient.first_name} {patient.last_name}"
+            if patient
+            else None
+        ),
+        "appointment_time": appointment.appointment_time,
+        "status": appointment.status
+    }
+
+
+# =========================================================
+# Doctor Dashboard
+# =========================================================
+
+@router.get(
+    "/dashboard/{queue_date}"
+)
+def doctor_dashboard(
+    queue_date: str,
+    current_user: User = Depends(
+        require_role("DOCTOR")
+    ),
+    db: Session = Depends(get_db)
+):
+
+    doctor = get_current_doctor(
+        current_user,
+        db
+    )
 
     appointments = (
         db.query(Appointment)
         .filter(
             Appointment.doctor_id == doctor.id,
-            Appointment.appointment_date == today
+            Appointment.appointment_date == queue_date
         )
         .order_by(
             Appointment.queue_number.asc()
@@ -75,13 +117,11 @@ def doctor_dashboard(
         .all()
     )
 
-    # 4. بیمار فعلی
-
     current_appointment = (
         db.query(Appointment)
         .filter(
             Appointment.doctor_id == doctor.id,
-            Appointment.appointment_date == today,
+            Appointment.appointment_date == queue_date,
             Appointment.status == "IN_VISIT"
         )
         .order_by(
@@ -90,14 +130,12 @@ def doctor_dashboard(
         .first()
     )
 
-    # 5. بیمار بعدی
-
     next_appointment = (
         db.query(Appointment)
         .filter(
             Appointment.doctor_id == doctor.id,
-            Appointment.appointment_date == today,
-            Appointment.status == "WAITING"
+            Appointment.appointment_date == queue_date,
+            Appointment.status == "CALLED"
         )
         .order_by(
             Appointment.queue_number.asc()
@@ -105,57 +143,19 @@ def doctor_dashboard(
         .first()
     )
 
-    # 6. ساخت current patient
-
-    current_patient = None
-
-    if current_appointment:
-
-        patient = (
-            db.query(Patient)
+    if not next_appointment:
+        next_appointment = (
+            db.query(Appointment)
             .filter(
-                Patient.id == current_appointment.patient_id
+                Appointment.doctor_id == doctor.id,
+                Appointment.appointment_date == queue_date,
+                Appointment.status == "WAITING"
+            )
+            .order_by(
+                Appointment.queue_number.asc()
             )
             .first()
         )
-
-        current_patient = {
-            "queue_number": current_appointment.queue_number,
-            "patient_id": patient.id if patient else None,
-            "patient_name": (
-                f"{patient.first_name} {patient.last_name}"
-                if patient
-                else None
-            ),
-            "status": current_appointment.status
-        }
-
-    # 7. ساخت next patient
-
-    next_patient = None
-
-    if next_appointment:
-
-        patient = (
-            db.query(Patient)
-            .filter(
-                Patient.id == next_appointment.patient_id
-            )
-            .first()
-        )
-
-        next_patient = {
-            "queue_number": next_appointment.queue_number,
-            "patient_id": patient.id if patient else None,
-            "patient_name": (
-                f"{patient.first_name} {patient.last_name}"
-                if patient
-                else None
-            ),
-            "status": next_appointment.status
-        }
-
-    # 8. پاسخ
 
     return {
         "doctor": {
@@ -165,14 +165,27 @@ def doctor_dashboard(
             "room_number": doctor.room_number
         },
 
-        "today": {
-            "date": today,
-            "total_patients": len(appointments)
-        },
+        "date": queue_date,
 
-        "current_patient": current_patient,
+        "total_patients": len(appointments),
 
-        "next_patient": next_patient
+        "current_patient": (
+            appointment_to_response(
+                current_appointment,
+                db
+            )
+            if current_appointment
+            else None
+        ),
+
+        "next_patient": (
+            appointment_to_response(
+                next_appointment,
+                db
+            )
+            if next_appointment
+            else None
+        )
     }
 
 
@@ -180,29 +193,45 @@ def doctor_dashboard(
 # Call Next Patient
 # =========================================================
 
-@router.post("/call-next")
+@router.post(
+    "/call-next/{queue_date}"
+)
 def call_next_patient(
+    queue_date: str,
     current_user: User = Depends(
         require_role("DOCTOR")
     ),
     db: Session = Depends(get_db)
 ):
 
-    if not current_user.doctor_id:
+    doctor = get_current_doctor(
+        current_user,
+        db
+    )
+
+    # Prevent calling another patient
+    # while a visit is already active.
+    active_visit = (
+        db.query(Appointment)
+        .filter(
+            Appointment.doctor_id == doctor.id,
+            Appointment.appointment_date == queue_date,
+            Appointment.status == "IN_VISIT"
+        )
+        .first()
+    )
+
+    if active_visit:
         raise HTTPException(
             status_code=400,
-            detail="Doctor account is not linked to a doctor"
+            detail="Doctor already has an active visit"
         )
-
-    today = jdatetime.date.today().strftime(
-        "%Y-%m-%d"
-    )
 
     appointment = (
         db.query(Appointment)
         .filter(
-            Appointment.doctor_id == current_user.doctor_id,
-            Appointment.appointment_date == today,
+            Appointment.doctor_id == doctor.id,
+            Appointment.appointment_date == queue_date,
             Appointment.status == "WAITING"
         )
         .order_by(
@@ -222,24 +251,12 @@ def call_next_patient(
     db.commit()
     db.refresh(appointment)
 
-    patient = (
-        db.query(Patient)
-        .filter(
-            Patient.id == appointment.patient_id
-        )
-        .first()
-    )
-
     return {
         "message": "Patient called successfully",
-        "queue_number": appointment.queue_number,
-        "patient_id": appointment.patient_id,
-        "patient_name": (
-            f"{patient.first_name} {patient.last_name}"
-            if patient
-            else None
-        ),
-        "status": appointment.status
+        **appointment_to_response(
+            appointment,
+            db
+        )
     }
 
 
@@ -247,29 +264,43 @@ def call_next_patient(
 # Start Visit
 # =========================================================
 
-@router.post("/start-visit")
+@router.post(
+    "/start-visit/{queue_date}"
+)
 def start_visit(
+    queue_date: str,
     current_user: User = Depends(
         require_role("DOCTOR")
     ),
     db: Session = Depends(get_db)
 ):
 
-    if not current_user.doctor_id:
+    doctor = get_current_doctor(
+        current_user,
+        db
+    )
+
+    active_visit = (
+        db.query(Appointment)
+        .filter(
+            Appointment.doctor_id == doctor.id,
+            Appointment.appointment_date == queue_date,
+            Appointment.status == "IN_VISIT"
+        )
+        .first()
+    )
+
+    if active_visit:
         raise HTTPException(
             status_code=400,
-            detail="Doctor account is not linked to a doctor"
+            detail="Doctor already has an active visit"
         )
-
-    today = jdatetime.date.today().strftime(
-        "%Y-%m-%d"
-    )
 
     appointment = (
         db.query(Appointment)
         .filter(
-            Appointment.doctor_id == current_user.doctor_id,
-            Appointment.appointment_date == today,
+            Appointment.doctor_id == doctor.id,
+            Appointment.appointment_date == queue_date,
             Appointment.status == "CALLED"
         )
         .order_by(
@@ -289,24 +320,12 @@ def start_visit(
     db.commit()
     db.refresh(appointment)
 
-    patient = (
-        db.query(Patient)
-        .filter(
-            Patient.id == appointment.patient_id
-        )
-        .first()
-    )
-
     return {
         "message": "Visit started successfully",
-        "queue_number": appointment.queue_number,
-        "patient_id": appointment.patient_id,
-        "patient_name": (
-            f"{patient.first_name} {patient.last_name}"
-            if patient
-            else None
-        ),
-        "status": appointment.status
+        **appointment_to_response(
+            appointment,
+            db
+        )
     }
 
 
@@ -314,29 +333,27 @@ def start_visit(
 # End Visit
 # =========================================================
 
-@router.post("/end-visit")
+@router.post(
+    "/end-visit/{queue_date}"
+)
 def end_visit(
+    queue_date: str,
     current_user: User = Depends(
         require_role("DOCTOR")
     ),
     db: Session = Depends(get_db)
 ):
 
-    if not current_user.doctor_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Doctor account is not linked to a doctor"
-        )
-
-    today = jdatetime.date.today().strftime(
-        "%Y-%m-%d"
+    doctor = get_current_doctor(
+        current_user,
+        db
     )
 
     appointment = (
         db.query(Appointment)
         .filter(
-            Appointment.doctor_id == current_user.doctor_id,
-            Appointment.appointment_date == today,
+            Appointment.doctor_id == doctor.id,
+            Appointment.appointment_date == queue_date,
             Appointment.status == "IN_VISIT"
         )
         .order_by(
@@ -356,22 +373,10 @@ def end_visit(
     db.commit()
     db.refresh(appointment)
 
-    patient = (
-        db.query(Patient)
-        .filter(
-            Patient.id == appointment.patient_id
-        )
-        .first()
-    )
-
     return {
         "message": "Visit completed successfully",
-        "queue_number": appointment.queue_number,
-        "patient_id": appointment.patient_id,
-        "patient_name": (
-            f"{patient.first_name} {patient.last_name}"
-            if patient
-            else None
-        ),
-        "status": appointment.status
+        **appointment_to_response(
+            appointment,
+            db
+        )
     }

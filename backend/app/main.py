@@ -12,7 +12,8 @@ from app.api import daily_queue
 from app.scheduler import start_scheduler, stop_scheduler
 from app.api import doctor_panel
 from app.api import doctor_calendar
-
+from app.api import clinics
+from app.api import reception
 Base.metadata.create_all(bind=engine)
 
 
@@ -34,9 +35,16 @@ def shutdown_event():
 app.include_router(
     doctors.router
 )
+app.include_router(
+    clinics.router
+)
 
 app.include_router(
     patients.router
+)
+
+app.include_router(
+    reception.router
 )
 
 app.include_router(

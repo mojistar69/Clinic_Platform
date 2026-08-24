@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 
 from app.database.database import Base
+from app.models.models import Doctor, Patient
 from enum import Enum
 
 

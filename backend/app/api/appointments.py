@@ -40,10 +40,6 @@ from app.models.models import (
     "/book",
     response_model=AppointmentResponse
 )
-@router.post(
-    "/book",
-    response_model=AppointmentResponse
-)
 def book_appointment(
     request: AppointmentBookRequest,
     db: Session = Depends(get_db),
