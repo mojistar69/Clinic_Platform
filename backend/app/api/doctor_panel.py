@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
+from app.api.websocket import manager
 from app.database.database import get_db
 from app.auth.permissions import require_role
 
@@ -17,7 +17,9 @@ router = APIRouter(
     prefix="/doctor-panel",
     tags=["Doctor Panel"]
 )
-
+from app.services.realtime_service import (
+    broadcast_queue_update
+)
 
 # =========================================================
 # Helpers
@@ -267,7 +269,7 @@ def call_next_patient(
 @router.post(
     "/start-visit/{queue_date}"
 )
-def start_visit(
+async def start_visit(
     queue_date: str,
     current_user: User = Depends(
         require_role("DOCTOR")
@@ -319,7 +321,32 @@ def start_visit(
 
     db.commit()
     db.refresh(appointment)
+    await manager.broadcast_queue(
+    doctor_id=appointment.doctor_id,
+    queue_date=appointment.appointment_date,
+    message={
+        "type": "VISIT_STARTED",
+        "appointment_id": appointment.id,
+        "queue_number": appointment.queue_number,
+        "status": appointment.status
+    }
+)
 
+    await manager.broadcast_patient(
+    appointment_id=appointment.id,
+    message={
+        "type": "APPOINTMENT_STATUS_CHANGED",
+        "appointment_id": appointment.id,
+        "queue_number": appointment.queue_number,
+        "status": appointment.status,
+        "message": "ویزیت شما شروع شد"
+    }
+)
+    await broadcast_queue_update(
+    db,
+    appointment.doctor_id,
+    appointment.appointment_date
+)
     return {
         "message": "Visit started successfully",
         **appointment_to_response(
@@ -336,7 +363,7 @@ def start_visit(
 @router.post(
     "/end-visit/{queue_date}"
 )
-def end_visit(
+async def end_visit(
     queue_date: str,
     current_user: User = Depends(
         require_role("DOCTOR")
@@ -372,7 +399,32 @@ def end_visit(
 
     db.commit()
     db.refresh(appointment)
+    await manager.broadcast_queue(
+    doctor_id=appointment.doctor_id,
+    queue_date=appointment.appointment_date,
+    message={
+        "type": "VISIT_COMPLETED",
+        "appointment_id": appointment.id,
+        "queue_number": appointment.queue_number,
+        "status": appointment.status
+    }
+)
 
+    await manager.broadcast_patient(
+    appointment_id=appointment.id,
+    message={
+        "type": "APPOINTMENT_STATUS_CHANGED",
+        "appointment_id": appointment.id,
+        "queue_number": appointment.queue_number,
+        "status": appointment.status,
+        "message": "ویزیت شما به پایان رسید"
+    }
+)
+    await broadcast_queue_update(
+    db,
+    appointment.doctor_id,
+    appointment.appointment_date
+)
     return {
         "message": "Visit completed successfully",
         **appointment_to_response(

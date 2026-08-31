@@ -21,8 +21,10 @@ from app.schemas.appointment import (
 from app.services.appointment_service import (
     calculate_appointment_time
 )
-
-
+from app.api.websocket import manager
+from app.services.realtime_service import (
+    broadcast_queue_update
+)
 router = APIRouter(
     prefix="/appointments",
     tags=["Appointments"]
@@ -141,7 +143,7 @@ def get_my_appointment_history(
     "/my/{appointment_id}/cancel",
     response_model=AppointmentResponse
 )
-def cancel_my_appointment(
+async def cancel_my_appointment(
     appointment_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(
@@ -228,8 +230,33 @@ def cancel_my_appointment(
             queue.status = "FULL"
 
     db.commit()
+    await broadcast_queue_update(
+    db,
+    appointment.doctor_id,
+    appointment.appointment_date
+)
     db.refresh(appointment)
+    await manager.broadcast_queue(
+    doctor_id=appointment.doctor_id,
+    queue_date=appointment.appointment_date,
+    message={
+        "type": "APPOINTMENT_CANCELLED",
+        "appointment_id": appointment.id,
+        "queue_number": appointment.queue_number,
+        "status": appointment.status
+    }
+)
 
+    await manager.broadcast_patient(
+    appointment_id=appointment.id,
+    message={
+        "type": "APPOINTMENT_STATUS_CHANGED",
+        "appointment_id": appointment.id,
+        "queue_number": appointment.queue_number,
+        "status": appointment.status,
+        "message": "نوبت شما لغو شد"
+    }
+)
     return appointment
 # =========================================================
 # Book Appointment
@@ -642,6 +669,267 @@ def get_patient_appointment_history(
         .all()
     )
 
+
+
+# =========================================================
+# My Live Queue Status
+# =========================================================
+# =========================================================
+# My Live Queue Status
+# =========================================================
+
+@router.get(
+    "/my/{appointment_id}/queue-status"
+)
+def get_my_queue_status(
+    appointment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_role("PATIENT")
+    )
+):
+    if current_user.patient_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Patient profile not found"
+        )
+
+    # -----------------------------------------------------
+    # 1. Find appointment belonging to current patient
+    # -----------------------------------------------------
+
+    appointment = (
+        db.query(Appointment)
+        .filter(
+            Appointment.id == appointment_id,
+            Appointment.patient_id == current_user.patient_id
+        )
+        .first()
+    )
+
+    if not appointment:
+        raise HTTPException(
+            status_code=404,
+            detail="Appointment not found"
+        )
+
+    # -----------------------------------------------------
+    # 2. Find daily queue
+    # -----------------------------------------------------
+
+    queue = (
+        db.query(DailyDoctorQueue)
+        .filter(
+            DailyDoctorQueue.doctor_id == appointment.doctor_id,
+            DailyDoctorQueue.queue_date == appointment.appointment_date
+        )
+        .first()
+    )
+
+    if not queue:
+        raise HTTPException(
+            status_code=404,
+            detail="Daily queue not found"
+        )
+
+    # -----------------------------------------------------
+    # 3. Cancelled / No-show
+    # -----------------------------------------------------
+
+    if appointment.status in (
+        "CANCELLED",
+        "NO_SHOW"
+    ):
+        return {
+            "appointment_id": appointment.id,
+            "doctor_id": appointment.doctor_id,
+            "queue_date": appointment.appointment_date,
+            "queue_number": appointment.queue_number,
+            "appointment_time": appointment.appointment_time,
+            "status": appointment.status,
+            "queue_status": queue.status,
+            "capacity": queue.capacity,
+            "current_serving_number": None,
+            "last_served_number": None,
+            "people_ahead": 0,
+            "estimated_wait_minutes": 0,
+            "queue_position": None
+        }
+
+    # -----------------------------------------------------
+    # 4. Current patient IN_VISIT
+    # -----------------------------------------------------
+
+    current_visit = (
+        db.query(Appointment)
+        .filter(
+            Appointment.doctor_id == appointment.doctor_id,
+            Appointment.appointment_date == appointment.appointment_date,
+            Appointment.status == "IN_VISIT"
+        )
+        .order_by(
+            Appointment.queue_number.asc()
+        )
+        .first()
+    )
+
+    current_serving_number = (
+        current_visit.queue_number
+        if current_visit
+        else None
+    )
+
+    # -----------------------------------------------------
+    # 5. Last DONE patient
+    # -----------------------------------------------------
+
+    last_done = (
+        db.query(Appointment)
+        .filter(
+            Appointment.doctor_id == appointment.doctor_id,
+            Appointment.appointment_date == appointment.appointment_date,
+            Appointment.status == "DONE"
+        )
+        .order_by(
+            Appointment.queue_number.desc()
+        )
+        .first()
+    )
+
+    last_served_number = (
+        last_done.queue_number
+        if last_done
+        else 0
+    )
+
+    # -----------------------------------------------------
+    # 6. Active patients ahead
+    # -----------------------------------------------------
+
+    people_ahead = (
+        db.query(Appointment)
+        .filter(
+            Appointment.doctor_id == appointment.doctor_id,
+            Appointment.appointment_date == appointment.appointment_date,
+            Appointment.queue_number < appointment.queue_number,
+            Appointment.status.in_([
+                "WAITING",
+                "CONFIRMED",
+                "CALLED",
+                "IN_VISIT"
+            ])
+        )
+        .count()
+    )
+
+    # -----------------------------------------------------
+    # 7. Doctor schedule
+    # -----------------------------------------------------
+
+    try:
+        appointment_date = jdatetime.datetime.strptime(
+            appointment.appointment_date,
+            "%Y-%m-%d"
+        ).date()
+    except ValueError:
+        appointment_date = None
+
+    schedule = None
+
+    if appointment_date:
+        schedule = (
+            db.query(DoctorSchedule)
+            .filter(
+                DoctorSchedule.doctor_id == appointment.doctor_id,
+                DoctorSchedule.weekday == appointment_date.weekday(),
+                DoctorSchedule.is_active == True
+            )
+            .first()
+        )
+
+    slot_duration = (
+        schedule.slot_duration
+        if schedule and schedule.slot_duration
+        else 15
+    )
+
+    # -----------------------------------------------------
+    # 8. Estimated waiting time
+    # -----------------------------------------------------
+
+    estimated_wait_minutes = (
+        people_ahead * slot_duration
+    )
+
+    # -----------------------------------------------------
+    # 9. Queue position
+    # -----------------------------------------------------
+
+    active_before_or_current = (
+        db.query(Appointment)
+        .filter(
+            Appointment.doctor_id == appointment.doctor_id,
+            Appointment.appointment_date == appointment.appointment_date,
+            Appointment.queue_number <= appointment.queue_number,
+            Appointment.status.in_([
+                "WAITING",
+                "CONFIRMED",
+                "CALLED",
+                "IN_VISIT"
+            ])
+        )
+        .count()
+    )
+
+    queue_position = (
+        active_before_or_current
+        if appointment.status in [
+            "WAITING",
+            "CONFIRMED",
+            "CALLED"
+        ]
+        else None
+    )
+
+    # -----------------------------------------------------
+    # 10. Determine patient-facing status
+    # -----------------------------------------------------
+
+    if appointment.status == "IN_VISIT":
+        patient_queue_status = "IN_VISIT"
+
+    elif appointment.status == "CALLED":
+        patient_queue_status = "CALLED"
+
+    elif people_ahead == 0:
+        patient_queue_status = "READY"
+
+    elif people_ahead <= 2:
+        patient_queue_status = "NEAR"
+
+    else:
+        patient_queue_status = "WAITING"
+
+    # -----------------------------------------------------
+    # 11. Response
+    # -----------------------------------------------------
+
+    return {
+        "appointment_id": appointment.id,
+        "doctor_id": appointment.doctor_id,
+        "queue_date": appointment.appointment_date,
+        "queue_number": appointment.queue_number,
+        "appointment_time": appointment.appointment_time,
+        "status": appointment.status,
+        "patient_queue_status": patient_queue_status,
+        "queue_status": queue.status,
+        "capacity": queue.capacity,
+        "current_serving_number": current_serving_number,
+        "last_served_number": last_served_number,
+        "people_ahead": people_ahead,
+        "estimated_wait_minutes": estimated_wait_minutes,
+        "queue_position": queue_position
+    }
 
 # =========================================================
 # Get Single Appointment

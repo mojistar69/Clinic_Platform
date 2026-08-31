@@ -14,6 +14,7 @@ from app.api import doctor_panel
 from app.api import doctor_calendar
 from app.api import clinics
 from app.api import reception
+from app.api import websocket
 Base.metadata.create_all(bind=engine)
 
 
@@ -69,6 +70,10 @@ app.include_router(
 
 app.include_router(
     doctor_calendar.router
+)
+
+app.include_router(
+    websocket.router
 )
 
 @app.get("/")
