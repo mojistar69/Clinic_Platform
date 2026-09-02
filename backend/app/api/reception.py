@@ -11,8 +11,10 @@ from app.models.models import (
 )
 from app.models.user import User
 from app.api.websocket import manager
+
 from app.services.realtime_service import (
-    broadcast_queue_update
+    broadcast_queue_update,
+    broadcast_patient_queue_updates
 )
 router = APIRouter(
     prefix="/reception",
@@ -243,9 +245,18 @@ async def call_next_patient(
         "status": appointment.status,
         "message": "نوبت شما فراخوانده شد"
     }
+)           
+    print(
+    "WS QUEUE UPDATE:",
+    appointment.doctor_id,
+    appointment.appointment_date
 )
-
     await broadcast_queue_update(
+    db,
+    appointment.doctor_id,
+    appointment.appointment_date
+)
+    await broadcast_patient_queue_updates(
     db,
     appointment.doctor_id,
     appointment.appointment_date

@@ -23,7 +23,8 @@ from app.services.appointment_service import (
 )
 from app.api.websocket import manager
 from app.services.realtime_service import (
-    broadcast_queue_update
+    broadcast_queue_update,
+    broadcast_patient_queue_updates
 )
 router = APIRouter(
     prefix="/appointments",
@@ -230,7 +231,15 @@ async def cancel_my_appointment(
             queue.status = "FULL"
 
     db.commit()
+
+
     await broadcast_queue_update(
+    db,
+    appointment.doctor_id,
+    appointment.appointment_date
+)
+
+    await broadcast_patient_queue_updates(
     db,
     appointment.doctor_id,
     appointment.appointment_date

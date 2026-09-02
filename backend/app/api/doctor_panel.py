@@ -18,7 +18,8 @@ router = APIRouter(
     tags=["Doctor Panel"]
 )
 from app.services.realtime_service import (
-    broadcast_queue_update
+    broadcast_queue_update,
+    broadcast_patient_queue_updates
 )
 
 # =========================================================
@@ -343,6 +344,11 @@ async def start_visit(
     }
 )
     await broadcast_queue_update(
+    db,
+    appointment.doctor_id,
+    appointment.appointment_date
+)
+    await broadcast_patient_queue_updates(
     db,
     appointment.doctor_id,
     appointment.appointment_date

@@ -10,12 +10,14 @@ router = APIRouter(
 
 
 class ConnectionManager:
-    def __init__(self):
-        # queue_key -> connected clients
-        self.queue_connections = defaultdict(set)
 
-        # patient_key -> connected clients
+    def __init__(self):
+        self.queue_connections = defaultdict(set)
         self.patient_connections = defaultdict(set)
+
+    # =====================================================
+    # Queue connections
+    # =====================================================
 
     async def connect_queue(
         self,
@@ -34,6 +36,13 @@ class ConnectionManager:
             websocket
         )
 
+        print(
+            "QUEUE CONNECTED:",
+            key,
+            "connections=",
+            len(self.queue_connections[key])
+        )
+
     def disconnect_queue(
         self,
         websocket: WebSocket,
@@ -49,8 +58,22 @@ class ConnectionManager:
             websocket
         )
 
-        if not self.queue_connections[key]:
-            del self.queue_connections[key]
+        print(
+            "QUEUE DISCONNECTED:",
+            key,
+            "connections=",
+            len(self.queue_connections.get(key, set()))
+        )
+
+        if not self.queue_connections.get(key):
+            self.queue_connections.pop(
+                key,
+                None
+            )
+
+    # =====================================================
+    # Patient connections
+    # =====================================================
 
     async def connect_patient(
         self,
@@ -67,6 +90,13 @@ class ConnectionManager:
             websocket
         )
 
+        print(
+            "PATIENT CONNECTED:",
+            key,
+            "connections=",
+            len(self.patient_connections[key])
+        )
+
     def disconnect_patient(
         self,
         websocket: WebSocket,
@@ -80,8 +110,22 @@ class ConnectionManager:
             websocket
         )
 
-        if not self.patient_connections[key]:
-            del self.patient_connections[key]
+        print(
+            "PATIENT DISCONNECTED:",
+            key,
+            "connections=",
+            len(self.patient_connections.get(key, set()))
+        )
+
+        if not self.patient_connections.get(key):
+            self.patient_connections.pop(
+                key,
+                None
+            )
+
+    # =====================================================
+    # Broadcast to queue clients
+    # =====================================================
 
     async def broadcast_queue(
         self,
@@ -94,11 +138,22 @@ class ConnectionManager:
             queue_date
         )
 
+        # IMPORTANT:
+        # connections MUST be created before len()
         connections = list(
             self.queue_connections.get(
                 key,
                 set()
             )
+        )
+
+        print(
+            "BROADCAST QUEUE:",
+            key,
+            "connections=",
+            len(connections),
+            "message_type=",
+            message.get("type")
         )
 
         disconnected = []
@@ -108,7 +163,13 @@ class ConnectionManager:
                 await websocket.send_json(
                     message
                 )
-            except Exception:
+
+            except Exception as e:
+                print(
+                    "QUEUE SEND ERROR:",
+                    e
+                )
+
                 disconnected.append(
                     websocket
                 )
@@ -117,6 +178,16 @@ class ConnectionManager:
             self.queue_connections[key].discard(
                 websocket
             )
+
+        if not self.queue_connections.get(key):
+            self.queue_connections.pop(
+                key,
+                None
+            )
+
+    # =====================================================
+    # Broadcast to patient clients
+    # =====================================================
 
     async def broadcast_patient(
         self,
@@ -134,6 +205,15 @@ class ConnectionManager:
             )
         )
 
+        print(
+            "BROADCAST PATIENT:",
+            key,
+            "connections=",
+            len(connections),
+            "message_type=",
+            message.get("type")
+        )
+
         disconnected = []
 
         for websocket in connections:
@@ -141,7 +221,13 @@ class ConnectionManager:
                 await websocket.send_json(
                     message
                 )
-            except Exception:
+
+            except Exception as e:
+                print(
+                    "PATIENT SEND ERROR:",
+                    e
+                )
+
                 disconnected.append(
                     websocket
                 )
@@ -150,6 +236,16 @@ class ConnectionManager:
             self.patient_connections[key].discard(
                 websocket
             )
+
+        if not self.patient_connections.get(key):
+            self.patient_connections.pop(
+                key,
+                None
+            )
+
+    # =====================================================
+    # Helpers
+    # =====================================================
 
     @staticmethod
     def _queue_key(
@@ -187,6 +283,7 @@ async def queue_websocket(
     )
 
     try:
+
         await websocket.send_json({
             "type": "CONNECTED",
             "doctor_id": doctor_id,
@@ -198,13 +295,20 @@ async def queue_websocket(
             await websocket.receive_text()
 
     except WebSocketDisconnect:
+
         manager.disconnect_queue(
             websocket,
             doctor_id,
             queue_date
         )
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            "QUEUE WEBSOCKET ERROR:",
+            e
+        )
+
         manager.disconnect_queue(
             websocket,
             doctor_id,
@@ -229,6 +333,7 @@ async def patient_websocket(
     )
 
     try:
+
         await websocket.send_json({
             "type": "CONNECTED",
             "appointment_id": appointment_id,
@@ -239,12 +344,19 @@ async def patient_websocket(
             await websocket.receive_text()
 
     except WebSocketDisconnect:
+
         manager.disconnect_patient(
             websocket,
             appointment_id
         )
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            "PATIENT WEBSOCKET ERROR:",
+            e
+        )
+
         manager.disconnect_patient(
             websocket,
             appointment_id
